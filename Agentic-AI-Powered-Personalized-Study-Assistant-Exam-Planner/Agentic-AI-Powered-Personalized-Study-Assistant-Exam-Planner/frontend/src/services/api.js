@@ -73,7 +73,7 @@ export const askChatbot = (data) => api.post('/chat/ask', data);
 export const getChatHistory = (userId) => api.get(`/chat/history/${userId}`);
 
 // ── Voice / Notifications ───────────────────────────────────────────
-export const processVoiceCommand = (text) => api.post(`/voice/command?text=${encodeURIComponent(text)}`);
+export const processVoiceCommand = (text) => api.post('/voice/command', { text });
 export const speak = (data) => api.post('/voice/speak', data);
 export const sendNotification = (data) => api.post('/voice/notify', data);
 export const getNotifications = (userId, unreadOnly = false) =>

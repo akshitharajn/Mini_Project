@@ -21,6 +21,10 @@ class VoiceCommandResponse(BaseModel):
     command: str
 
 
+class VoiceCommandRequest(BaseModel):
+    text: str
+
+
 @router.post("/speak")
 async def tts(payload: SpeakRequest):
     """Convert text to speech."""
@@ -36,9 +40,9 @@ async def stt():
 
 
 @router.post("/command")
-async def process_voice_command(text: str):
+async def process_voice_command(payload: VoiceCommandRequest):
     """Parse a text command (from STT or typed) into an app action."""
-    parsed = parse_voice_command(text)
+    parsed = parse_voice_command(payload.text)
     return parsed
 
 
