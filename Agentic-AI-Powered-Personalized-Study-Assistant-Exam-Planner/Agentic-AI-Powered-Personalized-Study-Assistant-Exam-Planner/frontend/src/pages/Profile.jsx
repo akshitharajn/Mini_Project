@@ -189,8 +189,15 @@ export default function Profile() {
       setPreviewReady(false);
       setPreviewSubjects([]);
       await loadAll();
+      const generatedEndDate = (generatedData.schedule_entries || []).reduce(
+        (latest, entry) => (!latest || entry.scheduled_date > latest ? entry.scheduled_date : latest),
+        '',
+      );
+      const coverageText = `${generatedData.scheduled_topics}/${generatedData.total_topics} topics (${generatedData.coverage_percentage}%)`;
       toast.success(
-        `Extracted ${generatedData.topics_created} topics and generated ${generatedData.schedule_entries.length} sessions`
+        generatedEndDate && generatedEndDate > planEndDate
+          ? `Extracted ${generatedData.topics_created} topics, coverage ${coverageText}. Schedule extended through ${generatedEndDate}.`
+          : `Extracted ${generatedData.topics_created} topics, generated ${generatedData.schedule_entries.length} sessions with coverage ${coverageText}.`
       );
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Auto-generate from PDF failed');
@@ -258,8 +265,15 @@ export default function Profile() {
     try {
       setIsGenerating(true);
       const { data } = await confirmSyllabusAndGenerate(payload);
+      const generatedEndDate = (data.schedule_entries || []).reduce(
+        (latest, entry) => (!latest || entry.scheduled_date > latest ? entry.scheduled_date : latest),
+        '',
+      );
+      const coverageText = `${data.scheduled_topics}/${data.total_topics} topics (${data.coverage_percentage}%)`;
       toast.success(
-        `Created ${data.topics_created} topics and ${data.schedule_entries.length} sessions`
+        generatedEndDate && generatedEndDate > planEndDate
+          ? `Created ${data.topics_created} topics, coverage ${coverageText}. Schedule extended through ${generatedEndDate}.`
+          : `Created ${data.topics_created} topics and ${data.schedule_entries.length} sessions with coverage ${coverageText}.`
       );
       setPreviewReady(false);
       setPreviewSubjects([]);

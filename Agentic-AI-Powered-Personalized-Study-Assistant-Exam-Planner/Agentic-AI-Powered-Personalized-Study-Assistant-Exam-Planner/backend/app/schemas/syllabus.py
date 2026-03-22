@@ -39,4 +39,8 @@ class SyllabusConfirmRequest(BaseModel):
 class SyllabusConfirmOut(BaseModel):
     subjects_created: int
     topics_created: int
+    total_topics: int
+    scheduled_topics: int
+    coverage_percentage: float
+    schedule_plan: list[dict[str, str]]
     schedule_entries: list[ScheduleEntryOut]

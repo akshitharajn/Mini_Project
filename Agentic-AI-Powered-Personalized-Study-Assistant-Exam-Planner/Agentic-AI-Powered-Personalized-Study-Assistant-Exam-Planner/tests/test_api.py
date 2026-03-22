@@ -620,6 +620,93 @@ class TestScheduleGeneration:
             assert curr_key >= prev_key
 
 
+class TestSyllabusConfirmScheduling:
+    async def test_confirm_and_generate_returns_coverage_and_plan(self, client: AsyncClient):
+        user = (await client.post("/api/users", json={
+            "name": "Coverage User", "email": "coverage-user@example.com", "daily_study_hours": 2
+        })).json()
+
+        payload = {
+            "user_id": user["id"],
+            "start_date": "2026-02-10",
+            "end_date": "2026-02-11",
+            "daily_start_time": "08:00:00",
+            "daily_study_hours": 2,
+            "session_duration_mins": 60,
+            "break_duration_mins": 15,
+            "max_topics_per_day": 3,
+            "no_ai_mode": False,
+            "clear_existing": True,
+            "subjects": [
+                {
+                    "name": "Object Oriented Programming Through Java",
+                    "topics": [
+                        "Unit I: Classes and Objects (basics + examples)",
+                        "Unit II: Inheritance (types + examples)",
+                        "Unit III: Polymorphism and Method Overriding",
+                    ],
+                }
+            ],
+        }
+
+        resp = await client.post("/api/syllabus/confirm-and-generate", json=payload)
+        assert resp.status_code == 201
+        data = resp.json()
+
+        assert data["topics_created"] == 3
+        assert data["total_topics"] == 3
+        assert data["scheduled_topics"] >= 2
+        assert data["coverage_percentage"] >= 60.0
+        assert len(data["schedule_plan"]) > 0
+
+        plan_topics = [item["topic"] for item in data["schedule_plan"]]
+        assert len(plan_topics) == len(set(plan_topics))
+        first_plan = data["schedule_plan"][0]
+        assert set(first_plan.keys()) == {"date", "time", "subject", "topic", "unit"}
+        assert first_plan["unit"].startswith("UNIT-")
+
+    async def test_confirm_and_generate_auto_extends_when_coverage_is_low(self, client: AsyncClient):
+        user = (await client.post("/api/users", json={
+            "name": "Auto Extend User", "email": "auto-extend@example.com", "daily_study_hours": 1
+        })).json()
+
+        payload = {
+            "user_id": user["id"],
+            "start_date": "2026-02-10",
+            "end_date": "2026-02-10",
+            "daily_start_time": "08:00:00",
+            "daily_study_hours": 1,
+            "session_duration_mins": 60,
+            "break_duration_mins": 15,
+            "max_topics_per_day": 1,
+            "no_ai_mode": False,
+            "clear_existing": True,
+            "subjects": [
+                {
+                    "name": "Data Structures",
+                    "topics": [
+                        "Unit I: Arrays and Strings",
+                        "Unit II: Linked List Operations",
+                        "Unit III: Stacks and Queues",
+                        "Unit IV: Binary Search Trees",
+                        "Unit V: Graph Traversal Algorithms",
+                    ],
+                }
+            ],
+        }
+
+        resp = await client.post("/api/syllabus/confirm-and-generate", json=payload)
+        assert resp.status_code == 201
+        data = resp.json()
+
+        assert data["total_topics"] == 5
+        assert data["scheduled_topics"] >= 3
+        assert data["coverage_percentage"] >= 60.0
+
+        generated_dates = [entry["scheduled_date"] for entry in data["schedule_entries"]]
+        assert any(scheduled_date > payload["end_date"] for scheduled_date in generated_dates)
+
+
 class TestQuizFlow:
     async def test_generate_and_submit(self, client: AsyncClient):
         # Setup

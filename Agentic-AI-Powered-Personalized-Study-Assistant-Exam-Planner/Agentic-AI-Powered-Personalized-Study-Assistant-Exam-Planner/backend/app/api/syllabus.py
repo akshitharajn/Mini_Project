@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
+import math
 import re
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -30,7 +31,6 @@ from backend.app.services.robust_syllabus import (
 from backend.app.services.syllabus_parser import parse_subjects_and_topics
 from backend.app.services.scheduler import (
     blocks_to_entries,
-    generate_schedule,
     generate_schedule_rule_based,
 )
 from backend.app.services.topic_text import (
@@ -298,6 +298,27 @@ def _roman_to_int(token: str) -> int | None:
             total += score
             prev = score
     return total if total > 0 else None
+
+
+def _int_to_roman(value: int) -> str:
+    mapping = [
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ]
+    n = max(1, int(value))
+    out: list[str] = []
+    for arabic, roman in mapping:
+        while n >= arabic:
+            out.append(roman)
+            n -= arabic
+    return "".join(out)
 
 
 def _detect_unit_bounds(text: str) -> tuple[int, int]:
@@ -745,6 +766,44 @@ def _topic_unit_number(name: str) -> int | None:
     return _roman_to_int(match.group(1)) if match else None
 
 
+def _schedule_unit_label(topic_name: str) -> str:
+    unit_no = _topic_unit_number(topic_name)
+    if unit_no is None:
+        return "UNIT-NA"
+    return f"UNIT-{_int_to_roman(unit_no)}"
+
+
+def _build_schedule_plan(entries: list[ScheduleEntry]) -> list[dict[str, str]]:
+    plan: list[dict[str, str]] = []
+    for entry in entries:
+        if entry.is_revision:
+            continue
+        plan.append(
+            {
+                "date": entry.scheduled_date.isoformat(),
+                "time": f"{entry.start_time.strftime('%H:%M')}-{entry.end_time.strftime('%H:%M')}",
+                "subject": _humanize_topic_text(entry.subject_name or "General"),
+                "topic": _humanize_topic_text(entry.topic_name or ""),
+                "unit": _schedule_unit_label(entry.topic_name or ""),
+            }
+        )
+    return plan
+
+
+def _coverage_metrics(total_topics: int, entries: list[ScheduleEntry]) -> tuple[int, float]:
+    if total_topics <= 0:
+        return 0, 0.0
+    scheduled_topics = len(
+        {
+            entry.topic_id
+            for entry in entries
+            if not entry.is_revision and entry.topic_id
+        }
+    )
+    coverage_percentage = round((scheduled_topics / total_topics) * 100.0, 2)
+    return scheduled_topics, coverage_percentage
+
+
 def _build_revision_entries_between(
     *,
     user_id: str,
@@ -998,52 +1057,64 @@ async def confirm_and_generate(
     )
     subjects = list(result.scalars().unique().all())
 
-    await db.execute(
-        delete(ScheduleEntry).where(
-            ScheduleEntry.user_id == payload.user_id,
-            ScheduleEntry.scheduled_date >= payload.start_date,
-            ScheduleEntry.scheduled_date <= payload.end_date,
-        )
+    total_topics = sum(len(subject.topics) for subject in subjects)
+    if total_topics <= 0:
+        raise HTTPException(400, "No topics available for scheduling")
+
+    min_coverage_topics = max(1, math.ceil(total_topics * 0.60))
+
+    schedule_end_date = payload.end_date
+    blocks = generate_schedule_rule_based(
+        user_id=payload.user_id,
+        subjects=subjects,
+        start_date=payload.start_date,
+        end_date=schedule_end_date,
+        daily_hours=payload.daily_study_hours or user.daily_study_hours,
+        daily_start=payload.daily_start_time,
+        session_mins=payload.session_duration_mins,
+        break_mins=payload.break_duration_mins,
+        max_topics_per_day=payload.max_topics_per_day,
+        distribute_across_range=True,
+        split_long_topics=False,
+        ensure_full_coverage=False,
     )
 
-    if payload.no_ai_mode:
+    initially_scheduled_topic_ids = {block.topic_id for block in blocks}
+    if len(initially_scheduled_topic_ids) < min_coverage_topics:
+        schedule_end_date = max(payload.end_date, payload.start_date + timedelta(days=365))
         blocks = generate_schedule_rule_based(
             user_id=payload.user_id,
             subjects=subjects,
             start_date=payload.start_date,
-            end_date=payload.end_date,
+            end_date=schedule_end_date,
             daily_hours=payload.daily_study_hours or user.daily_study_hours,
             daily_start=payload.daily_start_time,
             session_mins=payload.session_duration_mins,
             break_mins=payload.break_duration_mins,
             max_topics_per_day=payload.max_topics_per_day,
             distribute_across_range=False,
+            split_long_topics=False,
+            ensure_full_coverage=True,
         )
-    else:
-        blocks = generate_schedule(
-            user_id=payload.user_id,
-            subjects=subjects,
-            start_date=payload.start_date,
-            end_date=payload.end_date,
-            daily_hours=payload.daily_study_hours or user.daily_study_hours,
-            daily_start=payload.daily_start_time,
-            session_mins=payload.session_duration_mins,
-            break_mins=payload.break_duration_mins,
-            max_topics_per_day=payload.max_topics_per_day,
-            avoid_topic_repeats=True,
-            enforce_unit_sequence=True,
-            distribute_across_range=True,
+
+    await db.execute(
+        delete(ScheduleEntry).where(
+            ScheduleEntry.user_id == payload.user_id,
+            ScheduleEntry.scheduled_date >= payload.start_date,
         )
+    )
+
     entries = blocks_to_entries(payload.user_id, blocks)
-    db.add_all(entries)
-    await db.flush()
+    if entries:
+        db.add_all(entries)
+        await db.flush()
 
     subject_name_by_id = {subject.id: subject.name for subject in subjects}
     topic_records = [topic for subject in subjects for topic in subject.topics]
     revision_entries = _build_revision_entries_between(
         user_id=payload.user_id,
         start_date=payload.start_date,
-        end_date=payload.end_date,
+        end_date=min(schedule_end_date, payload.end_date),
         session_duration_mins=payload.session_duration_mins,
         topics=topic_records,
         subject_name_by_id=subject_name_by_id,
@@ -1058,14 +1129,20 @@ async def confirm_and_generate(
         .where(
             ScheduleEntry.user_id == payload.user_id,
             ScheduleEntry.scheduled_date >= payload.start_date,
-            ScheduleEntry.scheduled_date <= payload.end_date,
+            ScheduleEntry.scheduled_date <= schedule_end_date,
         )
         .order_by(ScheduleEntry.scheduled_date, ScheduleEntry.start_time)
     )
     schedule_entries = list(entries_result.scalars().all())
+    scheduled_topics, coverage_percentage = _coverage_metrics(total_topics, schedule_entries)
+    schedule_plan = _build_schedule_plan(schedule_entries)
 
     return {
         "subjects_created": len(created_subject_ids),
         "topics_created": topics_created,
+        "total_topics": total_topics,
+        "scheduled_topics": scheduled_topics,
+        "coverage_percentage": coverage_percentage,
+        "schedule_plan": schedule_plan,
         "schedule_entries": _sanitize_schedule_entries(schedule_entries),
     }

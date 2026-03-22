@@ -99,8 +99,14 @@ cp .env.example .env
 # For MySQL set DATABASE_URL to:
 # mysql+aiomysql://root:password@127.0.0.1:3306/study_assistant
 
-# For Gmail login/signup email alerts, set:
+# For login/signup email alerts (Resend SDK), set:
 # AUTH_EMAIL_ENABLED=true
+# AUTH_EMAIL_PROVIDER=resend
+# RESEND_API_KEY=re_xxxxxxxxx
+# RESEND_FROM_EMAIL=onboarding@resend.dev
+# SMTP_FROM_NAME=Study Assistant
+#
+# Optional SMTP fallback (if AUTH_EMAIL_PROVIDER=smtp):
 # SMTP_HOST=smtp.gmail.com
 # SMTP_PORT=465
 # SMTP_USE_SSL=true
@@ -108,10 +114,9 @@ cp .env.example .env
 # SMTP_USERNAME=your-gmail-address@gmail.com
 # SMTP_PASSWORD=your-16-char-google-app-password
 # SMTP_FROM_EMAIL=your-gmail-address@gmail.com
-# SMTP_FROM_NAME=Study Assistant
 ```
 
-Note: Use a Google App Password (with 2-Step Verification enabled), not your normal Gmail password.
+Note: If you use SMTP fallback, use a Google App Password (with 2-Step Verification enabled), not your normal Gmail password.
 
 ### 4. Start the Backend
 

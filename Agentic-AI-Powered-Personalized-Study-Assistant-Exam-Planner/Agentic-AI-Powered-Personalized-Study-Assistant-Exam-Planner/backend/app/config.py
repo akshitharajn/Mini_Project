@@ -46,6 +46,9 @@ class Settings(BaseSettings):
 
     # Email (SMTP / Gmail)
     auth_email_enabled: bool = True
+    auth_email_provider: str = "resend"  # "resend" | "smtp"
+    resend_api_key: str = ""
+    resend_from_email: str = "onboarding@resend.dev"
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 465
     smtp_use_ssl: bool = True
@@ -54,6 +57,30 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from_email: str = ""
     smtp_from_name: str = "Study Assistant"
+
+    @field_validator(
+        "auth_email_provider",
+        "resend_api_key",
+        "resend_from_email",
+        "smtp_username",
+        "smtp_password",
+        "smtp_from_email",
+        "smtp_from_name",
+        mode="before",
+    )
+    @classmethod
+    def normalize_email_settings(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("auth_email_provider", mode="after")
+    @classmethod
+    def validate_auth_email_provider(cls, value: str) -> str:
+        lowered = value.lower()
+        if lowered not in {"resend", "smtp"}:
+            return "resend"
+        return lowered
 
     @field_validator("debug", mode="before")
     @classmethod
