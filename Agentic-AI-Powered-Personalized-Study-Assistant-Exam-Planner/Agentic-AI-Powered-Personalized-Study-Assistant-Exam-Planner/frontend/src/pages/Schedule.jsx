@@ -5,6 +5,7 @@ import RequireUser from '../components/RequireUser';
 import {
   generateSchedule,
   getSchedule,
+  exportScheduleCalendar,
   completeEntry,
   skipEntry,
   readyTopicForQuizzes,
@@ -143,6 +144,32 @@ export default function Schedule() {
     }
   };
 
+  const getFilenameFromDisposition = (dispositionHeader) => {
+    if (!dispositionHeader) return 'study_schedule.ics';
+    const match = dispositionHeader.match(/filename="?([^\"]+)"?/i);
+    return match?.[1] || 'study_schedule.ics';
+  };
+
+  const handleExportCalendar = async () => {
+    if (!userId) return;
+    try {
+      const response = await exportScheduleCalendar(userId);
+      const filename = getFilenameFromDisposition(response.headers['content-disposition']);
+      const fileBlob = new Blob([response.data], { type: 'text/calendar;charset=utf-8' });
+      const downloadUrl = URL.createObjectURL(fileBlob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(downloadUrl);
+      toast.success('Calendar file downloaded. Import it in Google Calendar or Outlook.');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Could not export calendar file');
+    }
+  };
+
   const grouped = entries.reduce((acc, entry) => {
     const dateKey = entry.scheduled_date;
     if (!acc[dateKey]) acc[dateKey] = [];
@@ -208,7 +235,25 @@ export default function Schedule() {
             <RefreshCw size={14} className={loading ? 'spin' : ''} />
             {loading ? ' Generating...' : ' Generate Schedule'}
           </button>
+          <button
+            className="btn btn-outline"
+            type="button"
+            style={{ marginLeft: '0.5rem' }}
+            onClick={handleExportCalendar}
+            disabled={entries.length === 0}
+          >
+            Export for Google/Outlook
+          </button>
         </form>
+
+        <div className="card" style={{ marginTop: '1rem' }}>
+          <p style={{ margin: '0 0 0.5rem 0' }}>
+            Calendar sync: export your schedule as <strong>.ics</strong>, then import it into your calendar.
+          </p>
+          <p style={{ margin: 0, fontSize: '0.9rem' }}>
+            Google: Settings {'>'} Import & export {'>'} Import. Outlook: Add calendar {'>'} Upload from file.
+          </p>
+        </div>
 
         {coverageEndDate && (
           <div className="card" style={{ marginTop: '1rem' }}>

@@ -53,6 +53,11 @@ export const generateScheduleFromSyllabusPdf = (formData) =>
     timeout: 300000,
   });
 export const getSchedule = (userId) => api.get(`/schedule/${userId}`);
+export const exportScheduleCalendar = (userId) =>
+  api.get(`/schedule/export/${userId}`, {
+    responseType: 'blob',
+    timeout: 60000,
+  });
 export const completeEntry = (id) => api.patch(`/schedule/complete/${id}`);
 export const skipEntry = (id) => api.post(`/schedule/skip/${id}`);
 

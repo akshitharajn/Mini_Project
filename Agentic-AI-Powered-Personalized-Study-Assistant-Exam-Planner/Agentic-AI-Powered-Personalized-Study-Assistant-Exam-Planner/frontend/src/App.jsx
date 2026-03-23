@@ -26,6 +26,7 @@ export default function App() {
         <Route path="/quiz" element={<Quiz />} />
         <Route path="/mind-map" element={<MindMap />} />
         <Route path="/chatbot" element={<Chatbot />} />
+        <Route path="/agent" element={<Chatbot />} />
       </Route>
     </Routes>
   );

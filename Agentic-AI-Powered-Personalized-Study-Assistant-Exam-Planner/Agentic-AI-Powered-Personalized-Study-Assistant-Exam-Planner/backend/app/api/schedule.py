@@ -7,6 +7,7 @@ import random
 import re
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import Response
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -789,6 +790,56 @@ def _build_revision_entries_between(
     return revision_entries
 
 
+def _ics_escape(value: str) -> str:
+    escaped = (value or "").replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
+    return escaped.replace("\n", "\\n")
+
+
+def _ics_datetime(value: datetime) -> str:
+    return value.strftime("%Y%m%dT%H%M%S")
+
+
+def _schedule_entries_to_ics(entries: list[ScheduleEntry]) -> str:
+    created_utc = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//StudyAssistant//Schedule Export//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        "X-WR-CALNAME:Study Schedule",
+    ]
+
+    for entry in entries:
+        start_dt = datetime.combine(entry.scheduled_date, entry.start_time)
+        end_dt = datetime.combine(entry.scheduled_date, entry.end_time)
+        status = "COMPLETED" if entry.completed else "CONFIRMED"
+        summary = _ics_escape(f"{entry.subject_name}: {entry.topic_name}")
+        description = _ics_escape(
+            "Study Assistant session\\n"
+            f"Subject: {entry.subject_name}\\n"
+            f"Topic: {entry.topic_name}\\n"
+            f"Duration: {int(entry.duration_mins)} mins"
+        )
+
+        lines.extend(
+            [
+                "BEGIN:VEVENT",
+                f"UID:schedule-{entry.id}@studyassistant.local",
+                f"DTSTAMP:{created_utc}",
+                f"DTSTART:{_ics_datetime(start_dt)}",
+                f"DTEND:{_ics_datetime(end_dt)}",
+                f"SUMMARY:{summary}",
+                f"DESCRIPTION:{description}",
+                f"STATUS:{status}",
+                "END:VEVENT",
+            ]
+        )
+
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines) + "\r\n"
+
+
 @router.post("/generate", response_model=list[ScheduleEntryOut], status_code=201)
 async def generate(payload: ScheduleGenerateRequest, db: AsyncSession = Depends(get_db)):
     """Generate (or regenerate) a study schedule for the date range."""
@@ -1333,6 +1384,29 @@ async def get_schedule(user_id: str, db: AsyncSession = Depends(get_db)):
     )
     result = await db.execute(q)
     return _sanitize_schedule_entries(list(result.scalars().all()))
+
+
+@router.get("/export/{user_id}")
+async def export_schedule_calendar(user_id: str, db: AsyncSession = Depends(get_db)):
+    """Export user schedule as an iCalendar (.ics) file for Google/Outlook import."""
+    q = (
+        select(ScheduleEntry)
+        .where(ScheduleEntry.user_id == user_id)
+        .order_by(ScheduleEntry.scheduled_date, ScheduleEntry.start_time)
+    )
+    result = await db.execute(q)
+    entries = _sanitize_schedule_entries(list(result.scalars().all()))
+    if not entries:
+        raise HTTPException(404, "No schedule found to export")
+
+    ics_content = _schedule_entries_to_ics(entries)
+    safe_user_id = re.sub(r"[^a-zA-Z0-9_-]", "_", user_id)
+    filename = f"study_schedule_{safe_user_id}.ics"
+    return Response(
+        content=ics_content,
+        media_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.patch("/complete/{entry_id}")
